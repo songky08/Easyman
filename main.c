@@ -1,5 +1,5 @@
 #define TARGET_IS_BLIZZARD_RA1
-#define UART
+//#define UART
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -72,8 +72,6 @@
 #define MPU6050_DLPF_BAND_5     6
 //////////// Scale Factor ////////////
 #define GYRO_SCALE_FACTOR 131.0
-//////////// RMS_Noise ////////////
-#define RMS_NOISE_1TO10 0.033
 //////////// HMC5883L register address ////////////
 #define HMC5883L_ADDRESS 0x1E
 #define HMC5883L_MEASURE_REG 0x00
@@ -109,13 +107,23 @@
 #define RED_LED   GPIO_PIN_1
 #define BLUE_LED  GPIO_PIN_2
 #define GREEN_LED GPIO_PIN_3
+//////////// Motor Control ////////////
+#define MOTOR_SPEED_OFFSET 750.0
 
 //////////// Global value ////////////
 double base_accel_xyz[3];
 double base_gyro_xyz[3];
 double angle_xyz_f[3];
+double Kp = 0.5;
+double Ki = 0.2;
+double Kd = 0.3;
 int clock_10us;
 int crt_clock;
+double pd0_speed = MOTOR_SPEED_OFFSET;
+double pd1_speed = MOTOR_SPEED_OFFSET;
+double pe4_speed = MOTOR_SPEED_OFFSET;
+double pe5_speed = MOTOR_SPEED_OFFSET;
+int32_t rcv_char;
 
 void UART0Send(const uint8_t *pui8Buffer, uint32_t ui32Count)
 {
@@ -131,28 +139,174 @@ void UART1Send(const uint8_t *pui8Buffer, uint32_t ui32Count)
         ROM_UARTCharPutNonBlocking(UART1_BASE, *pui8Buffer++);
     }
 }
+void BlueSendKp(){
+    int cnt;
+    UART1Send("Kp : ", sizeof("Kp : "));
+    cnt = (int)(Kp * 10);
+//    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 1000 + '0');
+//    cnt %= 1000;
+//    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 100 + '0');
+//    cnt %= 100;
+    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 10 + '0');
+    cnt %= 10;
+    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 1 + '0');
+}
+void BlueSendKi(){
+    int cnt;
+    UART1Send("Ki : ", sizeof("Ki : "));
+    cnt = (int)(Kp * 10);
+//    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 1000 + '0');
+//    cnt %= 1000;
+//    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 100 + '0');
+//    cnt %= 100;
+    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 10 + '0');
+    cnt %= 10;
+    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 1 + '0');
+}
+void BlueSendKd(){
+    int cnt;
+    UART1Send("Kd : ", sizeof("Kd : "));
+    cnt = (int)(Kd * 10);
+//    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 1000 + '0');
+//    cnt %= 1000;
+//    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 100 + '0');
+//    cnt %= 100;
+    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 10 + '0');
+    cnt %= 10;
+    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 1 + '0');
+}
+void BlueSendPitch(){
+    int cnt;
+    UART1Send("Pitch : ", sizeof("Pitch : "));
+    cnt = (int)angle_xyz_f[1];
+    if(cnt < 0){
+        cnt = -cnt;
+        ROM_UARTCharPutNonBlocking(UART1_BASE, '-');
+        ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 100 + '0');
+        cnt %= 100;
+        ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 10 + '0');
+        cnt %= 10;
+        ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 1 + '0');
+    }else{
+        ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 100 + '0');
+        cnt %= 100;
+        ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 10 + '0');
+        cnt %= 10;
+        ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 1 + '0');
+    }
+}
+void BlueSendRoll(){
+    int cnt;
+    UART1Send("Roll : ", sizeof("Roll : "));
+    cnt = (int)angle_xyz_f[0];
+    if(cnt < 0){
+        cnt = -cnt;
+        ROM_UARTCharPutNonBlocking(UART1_BASE, '-');
+        ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 100 + '0');
+        cnt %= 100;
+        ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 10 + '0');
+        cnt %= 10;
+        ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 1 + '0');
+    }else{
+        ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 100 + '0');
+        cnt %= 100;
+        ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 10 + '0');
+        cnt %= 10;
+        ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 1 + '0');
+    }
+}
+void BlueSendD1Speed(){
+    int cnt;
+    UART1Send("D1Speed : ", sizeof("D1Speed : "));
+    cnt = pd1_speed;
+    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 1000 + '0');
+    cnt %= 1000;
+    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 100 + '0');
+    cnt %= 100;
+    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 10 + '0');
+    cnt %= 10;
+    ROM_UARTCharPutNonBlocking(UART1_BASE, cnt / 1 + '0');
+
+}
+void nLine(){
+    ROM_UARTCharPutNonBlocking(UART1_BASE, '\n');
+    ROM_UARTCharPutNonBlocking(UART1_BASE, '\r');
+}
 void UART1IntHandler(){
     uint32_t ui32Status;
-    int32_t rcv_char;
-    static uint8_t str[] = "Receive : ";
+//    int32_t cnt;
+//    static uint8_t str0[] = "Receive : ";
+//    static uint8_t str1[] = "Kp : ";
     ui32Status = ROM_UARTIntStatus(UART1_BASE, true);
     ROM_UARTIntClear(UART1_BASE, ui32Status);
 
     while(ROM_UARTCharsAvail(UART1_BASE))
     {
         rcv_char = ROM_UARTCharGetNonBlocking(UART1_BASE);
-        UART0Send(str, sizeof(str));
-        UART1Send(str, sizeof(str));
-        ROM_UARTCharPutNonBlocking(UART0_BASE, rcv_char);
-        ROM_UARTCharPutNonBlocking(UART1_BASE, rcv_char);
-        ROM_UARTCharPutNonBlocking(UART0_BASE, '\n');
-        ROM_UARTCharPutNonBlocking(UART1_BASE, '\n');
-        ROM_UARTCharPutNonBlocking(UART0_BASE, '\r');
-        ROM_UARTCharPutNonBlocking(UART1_BASE, '\r');
-//
-//        GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_2, GPIO_PIN_2);
-//        SysCtlDelay(SysCtlClockGet() / (1000 * 3));
-//        GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_2, 0);
+//#ifdef UART
+//        UART0Send(str0, sizeof(str0));
+//#endif
+//        UART1Send(str1, sizeof(str1));
+//        if(rcv_char == '1'){
+//            pd0_speed = (pd0_speed <= 600) ? 600 : pd0_speed - 10;
+//            pd1_speed = (pd1_speed <= 600) ? 600 : pd1_speed - 10;
+//            pe4_speed = (pe4_speed <= 600) ? 600 : pe4_speed - 10;
+//            pe5_speed = (pe5_speed <= 600) ? 600 : pe5_speed - 10;
+//        }else if(rcv_char == '2'){
+//            pd0_speed = (pd0_speed >= 1480) ? 1480 : pd0_speed + 10;
+//            pd1_speed = (pd1_speed >= 1480) ? 1480 : pd1_speed + 10;
+//            pe4_speed = (pe4_speed >= 1480) ? 1480 : pe4_speed + 10;
+//            pe5_speed = (pe5_speed >= 1480) ? 1480 : pe5_speed + 10;
+//        }else if(rcv_char == '3'){
+//            pd0_speed = 600;
+//            pd1_speed = 600;
+//            pe4_speed = 600;
+//            pe5_speed = 600;
+//        }
+        if(rcv_char == '1'){
+            Kp += 0.1;
+            BlueSendKp();
+            nLine();
+        }else if(rcv_char == '2'){
+            Kp -= 0.1;
+            BlueSendKp();
+            nLine();
+        }else if(rcv_char == '3'){
+            pd0_speed = 0;
+            pd1_speed = 0;
+            pe4_speed = 0;
+            pe5_speed = 0;
+        }else if(rcv_char == '4'){
+            Ki += 0.1;
+            BlueSendKi();
+            nLine();
+        }else if(rcv_char == '5'){
+            Ki -= 0.1;
+            BlueSendKi();
+            nLine();
+        }else if(rcv_char == '6'){
+            pd0_speed += 2;
+            pd1_speed += 2;
+            pe4_speed += 2;
+            pe5_speed += 2;
+            BlueSendD1Speed();
+            nLine();
+        }else if(rcv_char == '7'){
+            Kd += 0.1;
+            BlueSendKd();
+            nLine();
+        }else if(rcv_char == '8'){
+            Kd -= 0.1;
+            BlueSendKd();
+            nLine();
+        }else if(rcv_char == '9'){
+            pd0_speed -= 2;
+            pd1_speed -= 2;
+            pe4_speed -= 2;
+            pe5_speed -= 2;
+            BlueSendD1Speed();
+            nLine();
+        }
 
     }
 }
@@ -213,6 +367,56 @@ void InitPWM(void) {
     UARTprintf("PWM enabled.\n");
 #endif
 }
+void InitMotorESCKETI(void) {
+    volatile uint32_t PWM_FREQUENCY1 = 50;
+    volatile uint32_t ui32PWMClock = ROM_SysCtlClockGet() / 64;
+    volatile uint32_t ui32Load = (ui32PWMClock / PWM_FREQUENCY1) - 1;
+    PWMGenConfigure(PWM1_BASE, PWM_GEN_0, PWM_GEN_MODE_DOWN);
+    PWMGenPeriodSet(PWM1_BASE, PWM_GEN_0, ui32Load);
+    PWMPulseWidthSet(PWM1_BASE, PWM_OUT_0, 1250);
+    PWMOutputState(PWM1_BASE, PWM_OUT_0_BIT, true);
+    PWMGenEnable(PWM1_BASE, PWM_GEN_0);
+    PWMGenConfigure(PWM1_BASE, PWM_GEN_1, PWM_GEN_MODE_DOWN);
+    PWMGenPeriodSet(PWM1_BASE, PWM_GEN_1, ui32Load);
+    PWMPulseWidthSet(PWM1_BASE, PWM_OUT_1, 1250);
+    PWMOutputState(PWM1_BASE, PWM_OUT_1_BIT, true);
+    PWMGenEnable(PWM1_BASE, PWM_GEN_1);
+    PWMGenConfigure(PWM1_BASE, PWM_GEN_2, PWM_GEN_MODE_DOWN);
+    PWMGenPeriodSet(PWM1_BASE, PWM_GEN_2, ui32Load);
+    PWMPulseWidthSet(PWM1_BASE, PWM_OUT_2, 1250);
+    PWMOutputState(PWM1_BASE, PWM_OUT_2_BIT, true);
+    PWMGenEnable(PWM1_BASE, PWM_GEN_2);
+    PWMGenConfigure(PWM1_BASE, PWM_GEN_3, PWM_GEN_MODE_DOWN);
+    PWMGenPeriodSet(PWM1_BASE, PWM_GEN_3, ui32Load);
+    PWMPulseWidthSet(PWM1_BASE, PWM_OUT_3, 1250);
+    PWMOutputState(PWM1_BASE, PWM_OUT_3_BIT, true);
+    PWMGenEnable(PWM1_BASE, PWM_GEN_3);
+    SysCtlDelay(50000000);
+    PWMGenConfigure(PWM1_BASE, PWM_GEN_0, PWM_GEN_MODE_DOWN);
+    PWMGenPeriodSet(PWM1_BASE, PWM_GEN_0, ui32Load);
+    PWMPulseWidthSet(PWM1_BASE, PWM_OUT_0, 625);
+    PWMOutputState(PWM1_BASE, PWM_OUT_0_BIT, true);
+    PWMGenEnable(PWM1_BASE, PWM_GEN_0);
+    PWMGenConfigure(PWM1_BASE, PWM_GEN_1, PWM_GEN_MODE_DOWN);
+    PWMGenPeriodSet(PWM1_BASE, PWM_GEN_1, ui32Load);
+    PWMPulseWidthSet(PWM1_BASE, PWM_OUT_1, 625);
+    PWMOutputState(PWM1_BASE, PWM_OUT_1_BIT, true);
+    PWMGenEnable(PWM1_BASE, PWM_GEN_1);
+    PWMGenConfigure(PWM1_BASE, PWM_GEN_2, PWM_GEN_MODE_DOWN);
+    PWMGenPeriodSet(PWM1_BASE, PWM_GEN_2, ui32Load);
+    PWMPulseWidthSet(PWM1_BASE, PWM_OUT_2, 625);
+    PWMOutputState(PWM1_BASE, PWM_OUT_2_BIT, true);
+    PWMGenEnable(PWM1_BASE, PWM_GEN_2);
+    PWMGenConfigure(PWM1_BASE, PWM_GEN_3, PWM_GEN_MODE_DOWN);
+    PWMGenPeriodSet(PWM1_BASE, PWM_GEN_3, ui32Load);
+    PWMPulseWidthSet(PWM1_BASE, PWM_OUT_3, 625);
+    PWMOutputState(PWM1_BASE, PWM_OUT_3_BIT, true);
+    PWMGenEnable(PWM1_BASE, PWM_GEN_3);
+    SysCtlDelay(50000000);
+#ifdef UART
+    UARTprintf("Motor ESC initialized.\n");
+#endif
+}
 void InitMotorESC(void) {
     volatile uint32_t PWM_FREQUENCY1 = 50;
     volatile uint32_t ui32PWMClock = ROM_SysCtlClockGet() / 64;
@@ -262,8 +466,7 @@ void InitMotorESC(void) {
     ROM_PWMOutputState(PWM1_BASE, PWM_OUT_3_BIT, true);
     ROM_PWMGenEnable(PWM1_BASE, PWM_GEN_3);
 
-
-    ROM_SysCtlDelay(ROM_SysCtlClockGet() * 3);
+    ROM_SysCtlDelay(ROM_SysCtlClockGet());
 #ifdef UART
     UARTprintf("Motor ESC initialized.\n");
 #endif
@@ -274,7 +477,7 @@ void SettingPWMPD0() {//min = 664, max = 1499
 
     ROM_PWMGenConfigure(PWM1_BASE, PWM_GEN_0, PWM_GEN_MODE_DOWN);
     ROM_PWMGenPeriodSet(PWM1_BASE, PWM_GEN_0, 2082);
-    ROM_PWMPulseWidthSet(PWM1_BASE, PWM_OUT_0, 670);
+    ROM_PWMPulseWidthSet(PWM1_BASE, PWM_OUT_0, MOTOR_SPEED_OFFSET);
     ROM_PWMOutputState(PWM1_BASE, PWM_OUT_0_BIT, true);
     ROM_PWMGenEnable(PWM1_BASE, PWM_GEN_0);
 }
@@ -284,7 +487,7 @@ void SettingPWMPD1() {//min = 664, max = 1499
 
     ROM_PWMGenConfigure(PWM1_BASE, PWM_GEN_1, PWM_GEN_MODE_DOWN);
     ROM_PWMGenPeriodSet(PWM1_BASE, PWM_GEN_1, 2082);
-    ROM_PWMPulseWidthSet(PWM1_BASE, PWM_OUT_1, 670);
+    ROM_PWMPulseWidthSet(PWM1_BASE, PWM_OUT_1, MOTOR_SPEED_OFFSET);
     ROM_PWMOutputState(PWM1_BASE, PWM_OUT_1_BIT, true);
     ROM_PWMGenEnable(PWM1_BASE, PWM_GEN_1);
 }
@@ -294,7 +497,7 @@ void SettingPWMPE4() {//min = 664, max = 1499
 
     ROM_PWMGenConfigure(PWM1_BASE, PWM_GEN_2, PWM_GEN_MODE_DOWN);
     ROM_PWMGenPeriodSet(PWM1_BASE, PWM_GEN_2, 2082);
-    ROM_PWMPulseWidthSet(PWM1_BASE, PWM_OUT_2, 670);
+    ROM_PWMPulseWidthSet(PWM1_BASE, PWM_OUT_2, MOTOR_SPEED_OFFSET);
     ROM_PWMOutputState(PWM1_BASE, PWM_OUT_2_BIT, true);
     ROM_PWMGenEnable(PWM1_BASE, PWM_GEN_2);
 }
@@ -304,9 +507,21 @@ void SettingPWMPE5() {//min = 664, max = 1499
 
     ROM_PWMGenConfigure(PWM1_BASE, PWM_GEN_3, PWM_GEN_MODE_DOWN);
     ROM_PWMGenPeriodSet(PWM1_BASE, PWM_GEN_3, 2082);
-    ROM_PWMPulseWidthSet(PWM1_BASE, PWM_OUT_3, 670);
+    ROM_PWMPulseWidthSet(PWM1_BASE, PWM_OUT_3, MOTOR_SPEED_OFFSET);
     ROM_PWMOutputState(PWM1_BASE, PWM_OUT_3_BIT, true);
     ROM_PWMGenEnable(PWM1_BASE, PWM_GEN_3);
+}
+void PD0SpeedControl(uint32_t width){
+    ROM_PWMPulseWidthSet(PWM1_BASE, PWM_OUT_0, width);
+}
+void PD1SpeedControl(uint32_t width){
+    ROM_PWMPulseWidthSet(PWM1_BASE, PWM_OUT_1, width);
+}
+void PE4SpeedControl(uint32_t width){
+    ROM_PWMPulseWidthSet(PWM1_BASE, PWM_OUT_2, width);
+}
+void PE5SpeedControl(uint32_t width){
+    ROM_PWMPulseWidthSet(PWM1_BASE, PWM_OUT_3, width);
 }
 void ConfigureI2CBus(void) {
     ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C0);
@@ -338,6 +553,8 @@ void InitMPU6050(void) {
     ROM_SysCtlDelay(SYS_DELAY_1MS);
     I2C8bitWrite(MPU6050_ADDRESS, MPU6050_SLEEP_REG, MPU6050_SLEEP_DIS);
     ROM_SysCtlDelay(SYS_DELAY_1MS);
+//    I2C8bitWrite(MPU6050_ADDRESS, MPU6050_DLPF_CFG, MPU6050_DLPF_BAND_5);
+//    ROM_SysCtlDelay(SYS_DELAY_1MS);
 //    I2C8bitWrite(MPU6050_ADDRESS, MPU6050_PWR_MGMT_1, 0x00); //PWR_MGMT_1, Input disabled.
 //    ROM_SysCtlDelay(SYS_DELAY_1MS);
 //    I2C8bitWrite(MPU6050_ADDRESS, MPU6050_PWR_MGMT_2, 0x00); //PWR_MGMT_2
@@ -451,40 +668,39 @@ void GyroSpeedGet(double *gyro_speed){
     gyro_speed[0] = ((double)MPU6050_read(MPU6050_GYRO_XOUT_H) - base_gyro_xyz[0]) / GYRO_SCALE_FACTOR;
     gyro_speed[1] = ((double)MPU6050_read(MPU6050_GYRO_YOUT_H) - base_gyro_xyz[1]) / GYRO_SCALE_FACTOR;
     gyro_speed[2] = ((double)MPU6050_read(MPU6050_GYRO_ZOUT_H) - base_gyro_xyz[2]) / GYRO_SCALE_FACTOR;
-//        UARTprintf("\rGyro_Speed_X = %d, Gyro_Speed_Y = %d, Gyro_Speed_Z = %d"
-//                , (int)(gyro_speed[0]), (int)(gyro_speed[1]), (int)(gyro_speed[2]));
+//    UARTprintf("\rGyro_Speed_X = %3d, Gyro_Speed_Y = %3d, Gyro_Speed_Z = %3d       "
+//            , (int)(gyro_speed[0]), (int)(gyro_speed[1]), (int)(gyro_speed[2]));
 }
 void AccelAngleGet(double *accel_angle_xyz){
     double raw_accel_xyz[3];
     raw_accel_xyz[0] = (double)MPU6050_read(MPU6050_ACCEL_XOUT_H);
     raw_accel_xyz[1] = (double)MPU6050_read(MPU6050_ACCEL_YOUT_H);
     raw_accel_xyz[2] = (double)MPU6050_read(MPU6050_ACCEL_ZOUT_H);
-    //        UARTprintf("accel_x = %d, accel_y = %d, accel_z = %d\n"
-    //                , (int)(raw_accel_xyz[0] / 16383.0 * 1000), (int)(raw_accel_xyz[1] / 16383.0 * 1000), (int)(raw_accel_xyz[2] / 16383.0 * 1000));
-    //        accel_vector_length = sqrt(powf(raw_accel_xyz[0], 2) + powf(raw_accel_xyz[1], 2) + powf(raw_accel_xyz[2], 2));
+//    UARTprintf("accel_x = %d, accel_y = %d, accel_z = %d\n"
+//            , (int)(raw_accel_xyz[0] / 16383.0 * 1000), (int)(raw_accel_xyz[1] / 16383.0 * 1000), (int)(raw_accel_xyz[2] / 16383.0 * 1000));
+//    accel_vector_length = sqrt(powf(raw_accel_xyz[0], 2) + powf(raw_accel_xyz[1], 2) + powf(raw_accel_xyz[2], 2));
     accel_angle_xyz[0] = atan2(raw_accel_xyz[1], sqrt(pow(raw_accel_xyz[0], 2) + pow(raw_accel_xyz[2], 2))) * 180 / M_PI;
     accel_angle_xyz[1] = atan2(-1 * raw_accel_xyz[0], sqrt(pow(raw_accel_xyz[1], 2) + pow(raw_accel_xyz[2], 2))) * 180 / M_PI;
     accel_angle_xyz[2] = 0;
 //        UARTprintf("\rAngle_x = %d, Angle_y = %d    ", (int)accel_angle_xyz[0], (int)accel_angle_xyz[1]);
 }
-void GetRPY(double *roll, double *pitch, double *yaw){
-    double gyro_speed[3], accel_angle_xyz[3];
-    double dt = 0.0, alpha = 0.98, gain = 5;
-    clock_10us = 0;
+void GetRPY(double *roll, double *pitch, double *yaw, double *gyro_speed){
+    double accel_angle_xyz[3];
+    double dt = 0.0, alpha = 0.98;
 
     GyroSpeedGet(gyro_speed);
     AccelAngleGet(accel_angle_xyz);
-    while(clock_10us < DT_10MS);
 //        UARTprintf("clock_10us = %d\n", clock_10us);
+//    while(clock_10us < DT_10MS);
     dt = (double)clock_10us / (double)DT_1SEC;
-//        UARTprintf("dt * 1000 = %d\n", (int)(dt * 1000));
-//        angle_xyz_f[0] += (gyro_speed[0] - (1 - alpha) * (angle_xyz_f[0] - accel_angle_xyz[0])) * dt;
-//        angle_xyz_f[0] += gyro_speed[0] * dt * (1.0 - gain) / gain + (accel_angle_xyz[0] - angle_xyz_f[0]) / gain;
-//        angle_xyz_f[1] += gyro_speed[1] * dt * (1.0 - gain) / gain + (accel_angle_xyz[1] - angle_xyz_f[1]) / gain;
-    angle_xyz_f[0] = alpha * (angle_xyz_f[0] + gyro_speed[0] * dt) + (1.0 - alpha) * accel_angle_xyz[0];
-    angle_xyz_f[1] = alpha * (angle_xyz_f[1] + gyro_speed[1] * dt) + (1.0 - alpha) * accel_angle_xyz[1];
-    *roll = angle_xyz_f[0];
-    *pitch = angle_xyz_f[1];
+//    UARTprintf("dt * 1000 = %d\n", (int)(dt * 1000));
+//    angle_xyz_f[0] += (gyro_speed[0] - (1 - alpha) * (angle_xyz_f[0] - accel_angle_xyz[0])) * dt;
+//    angle_xyz_f[0] += gyro_speed[0] * dt * (1.0 - gain) / gain + (accel_angle_xyz[0] - angle_xyz_f[0]) / gain;
+//    angle_xyz_f[1] += gyro_speed[1] * dt * (1.0 - gain) / gain + (accel_angle_xyz[1] - angle_xyz_f[1]) / gain;
+//    angle_xyz_f[0] = alpha * (angle_xyz_f[0] + gyro_speed[0] * dt) + (1.0 - alpha) * accel_angle_xyz[0];
+//    angle_xyz_f[1] = alpha * (angle_xyz_f[1] + gyro_speed[1] * dt) + (1.0 - alpha) * accel_angle_xyz[1];
+    *roll = angle_xyz_f[0] = alpha * (angle_xyz_f[0] + gyro_speed[0] * dt) + (1.0 - alpha) * accel_angle_xyz[0];
+    *pitch = angle_xyz_f[1] = alpha * (angle_xyz_f[1] + gyro_speed[1] * dt) + (1.0 - alpha) * accel_angle_xyz[1];
     *yaw = yawGet();
 //    UARTprintf("Complementary Filter : Angle X = %d, Angle Y = %d, Angle Z = %d   \n", (int)*roll, (int)*pitch, (int)*yaw);
 
@@ -492,7 +708,10 @@ void GetRPY(double *roll, double *pitch, double *yaw){
 
 int main(void) {
     double roll, pitch, yaw;
-    int i = 0;
+    double dt = 0.0;
+    double pitch_p, roll_p, pitch_i = 0.0, roll_i = 0.0, pitch_d, roll_d;
+    double gyro_speed[3];
+
     ROM_FPUEnable();
     ROM_FPULazyStackingEnable();
     ROM_SysCtlClockSet(
@@ -501,30 +720,63 @@ int main(void) {
     ROM_IntMasterEnable();
 
     ConfigureUART();
-//    ConfigureI2CBus();
-//    ConfigureTimer();
+    ConfigureI2CBus();
+    ConfigureTimer();
     InitPWM();
-//    ConfigureLED();
-//    InitMPU6050();
-//    InitHMC5883L();
-//    CalibrateSensors();
-    InitMotorESC();
-    SettingPWMPD0();
-    SettingPWMPD1();
-    SettingPWMPE4();
-    SettingPWMPE5();
-//    InitMS5611();
-    ButtonsInit();
-    UARTprintf("Buttons Initailized\n");
-//
-//    UARTprintf("PWM period get = %d\n", ROM_PWMGenPeriodGet(PWM1_BASE, PWM_OUT_0));
-//    UARTprintf("PWM clock = %d\n", ROM_SysCtlPWMClockGet());
-//    UARTprintf("system clock rate = %d\n", ROM_SysCtlClockGet());
-//    UARTprintf("delta = %x\n", delta);
-    while(1){
-//        GetRPY(&roll, &pitch, &yaw);
-//        UARTprintf("\rComplementary Filter : Angle X = %d, Angle Y = %d, Angle Z = %d   ", (int)roll, (int)pitch, (int)yaw);
+    ConfigureLED();
+    InitMPU6050();
+    InitHMC5883L();
 
+    InitMotorESC();
+//    SettingPWMPD0();
+//    SettingPWMPE4();
+//    SettingPWMPD1();
+//    SettingPWMPE5();
+//    InitMS5611();
+    CalibrateSensors();
+    ButtonsInit();
+#ifdef UART
+    UARTprintf("Buttons Initailized\n");
+#endif
+//    while(rcv_char != '0'){
+//        clock_10us = 0;
+//
+//        SettingPWMPD0();
+//        SettingPWMPE4();
+////        SettingPWMPD1();
+////        SettingPWMPE5();
+//        GetRPY(&roll, &pitch, &yaw);
+//        BlueSendPitch();
+//        nLine();
+////        dt = (double)clock_10us / (double)DT_1SEC;
+////        UARTprintf("dt * 1000 = %d\n", (int)(dt * 1000));
+////        UARTprintf("Complementary Filter : Angle X = %d, Angle Y = %d, Angle Z = %d   \n"
+////                , (int)(roll), (int)(pitch), (int)(yaw));
+//    }
+    while(1){
+        clock_10us = 0;
+
+        GetRPY(&roll, &pitch, &yaw, gyro_speed);
+        dt = (double)clock_10us / (double)DT_1SEC;
+        roll_p = roll * Kp;
+        pitch_p = pitch * Kp;
+        roll_i += roll * dt * Ki;
+        pitch_i += pitch * dt * Ki;
+        roll_d = gyro_speed[0] * Kd;
+        pitch_d = gyro_speed[1] * Kd;
+        PE4SpeedControl(pe4_speed - pitch_p - pitch_i - pitch_d);
+        PD0SpeedControl(pd0_speed + pitch_p + pitch_i + pitch_d);
+        PD1SpeedControl(pd1_speed - roll_p - roll_i - roll_d);
+        PE5SpeedControl(pe5_speed + roll_p + roll_i + roll_d);
+//        UARTprintf("pd0_speed = %d, pe4_speed = %d, pitch = %d\n", (int)(pd0_speed + p), (int)(pe4_speed - p), (int)pitch);
+//        BlueSendSpeed();
+//        nLine();
+        BlueSendPitch();
+        nLine();
+//        UARTprintf("dt * 1000 = %d\n", (int)(dt * 1000));
+
+/*        UARTprintf("Complementary Filter : Angle Roll = %d, Angle Pitch = %d, Angle Yaw = %d   \n"
+                , (int)(roll), (int)(pitch), (int)(yaw));*/
         if(ButtonsPoll(0, 0) == 0xfe)
             break;
     }
